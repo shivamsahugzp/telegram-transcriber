@@ -43,35 +43,59 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     url = update.message.text.strip()
 
     if not is_supported_url(url):
-        await update.message.reply_text("Please send a valid video URL or upload a video file.")
+        await update.message.reply_text(
+            "Hmm, I don't recognise that as a video link.\n\n"
+            "Try sending a YouTube, Instagram, or Google Drive link — or just upload the video directly."
+        )
         return
 
-    status_msg = await update.message.reply_text("⏳ Downloading video...")
+    status_msg = await update.message.reply_text("Got it! Downloading the video now...")
 
     try:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            await status_msg.edit_text("⏳ Downloading audio...")
             audio_path = download_audio(url, tmp_dir)
 
-            await status_msg.edit_text("🔤 Transcribing... (this may take a minute)")
+            await status_msg.edit_text("Transcribing now... this usually takes 30–60 seconds ⏳")
             transcript = transcribe_file(audio_path)
 
         await status_msg.delete()
         await _send_transcript(update, transcript)
 
     except ValueError as e:
-        # User-friendly errors (e.g. login required)
-        await status_msg.edit_text(f"⚠️ {str(e)}")
+        await status_msg.edit_text(str(e))
     except Exception as e:
         logger.error("Error processing URL %s: %s", url, e)
-        err = str(e)
-        if "login required" in err.lower() or "rate-limit" in err.lower():
+        err = str(e).lower()
+
+        if "instagram" in err and ("login" in err or "rate" in err or "cookie" in err or "credentials" in err):
             await status_msg.edit_text(
-                "⚠️ This platform requires login to download.\n\n"
-                "Please download the video and send it as a file directly to this bot instead."
+                "Instagram is blocking the download — it needs you to be logged in.\n\n"
+                "The easiest fix: download the Reel on your phone and send the video file here directly. "
+                "I'll transcribe it just the same! 🎙️"
+            )
+        elif "private" in err or "members only" in err:
+            await status_msg.edit_text(
+                "This looks like a private video — I can't access it.\n\n"
+                "If you have the video saved, just send it as a file and I'll transcribe it."
+            )
+        elif "not available" in err or "removed" in err or "deleted" in err:
+            await status_msg.edit_text(
+                "Couldn't find that video — it may have been deleted or made private."
+            )
+        elif "unsupported url" in err:
+            await status_msg.edit_text(
+                "I couldn't download from that link. Try YouTube, Instagram, or Google Drive — "
+                "or just upload the video file directly."
+            )
+        elif "network" in err or "connection" in err or "timeout" in err:
+            await status_msg.edit_text(
+                "Something went wrong with the connection. Please try again in a moment."
             )
         else:
-            await status_msg.edit_text(f"❌ Failed to process video.\n\nError: {err}")
+            await status_msg.edit_text(
+                "Something went wrong while processing that video. "
+                "Try sending the video file directly instead of a link."
+            )
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -82,7 +106,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("Please send a video, audio, or voice message.")
         return
 
-    status_msg = await message.reply_text("⏳ Downloading file...")
+    status_msg = await message.reply_text("Got it! Give me a moment to process this...")
 
     try:
         file = await context.bot.get_file(file_obj.file_id)
@@ -98,7 +122,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             file_path = os.path.join(tmp_dir, f"input.{extension}")
             await file.download_to_drive(file_path)
 
-            await status_msg.edit_text("🔤 Transcribing... (this may take a minute)")
+            await status_msg.edit_text("Transcribing now... this usually takes 30–60 seconds ⏳")
 
             if extension in ("mp3", "ogg", "m4a", "wav"):
                 audio_path = file_path
@@ -117,28 +141,40 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.error("Error processing file: %s", e)
-        await status_msg.edit_text(f"❌ Failed to transcribe file.\n\nError: {str(e)}")
+        err = str(e).lower()
+        if "no speech" in err or "audio" in err:
+            await status_msg.edit_text(
+                "I couldn't detect any speech in that file. "
+                "Make sure the video has audio and try again."
+            )
+        else:
+            await status_msg.edit_text(
+                "Something went wrong while processing your file. "
+                "Please try again — if it keeps failing, try a different format (MP4 or MP3 works best)."
+            )
 
 
 async def _send_transcript(update: Update, transcript: str) -> None:
     """Send transcript, splitting into chunks if it exceeds Telegram's message limit."""
     if not transcript.strip():
-        await update.message.reply_text("⚠️ No speech detected in the audio.")
+        await update.message.reply_text(
+            "I couldn't detect any speech in this video. "
+            "Make sure the video has audio, then try again."
+        )
         return
 
-    header = "📝 *Transcript:*\n\n"
+    header = "📝 *Here's your transcript:*\n\n"
     full_text = header + transcript
 
     if len(full_text) <= MAX_TELEGRAM_MSG_LEN:
         await update.message.reply_text(full_text, parse_mode="Markdown")
     else:
-        # Send as a text file for long transcripts
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
             f.write(transcript)
             tmp_path = f.name
 
         await update.message.reply_text(
-            f"📝 Transcript is long ({len(transcript)} characters). Sending as a file."
+            "The transcript is quite long, so I'm sending it as a text file."
         )
         with open(tmp_path, "rb") as f:
             await update.message.reply_document(document=f, filename="transcript.txt")
