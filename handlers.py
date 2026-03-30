@@ -3,7 +3,7 @@ import tempfile
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from downloader import download_audio, save_telegram_file, extract_audio_from_video, is_supported_url
+from downloader import download_audio, is_supported_url
 from transcriber import transcribe_file
 
 logger = logging.getLogger(__name__)
