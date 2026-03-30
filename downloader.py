@@ -1,5 +1,6 @@
 import os
-import tempfile
+import glob
+import subprocess
 import yt_dlp
 
 
@@ -31,30 +32,40 @@ def _get_cookies_file(url: str, tmp_dir: str) -> str | None:
     return None
 
 
+def _extract_audio_ffmpeg(input_path: str, output_dir: str) -> str:
+    """Extract audio from any video/audio file using ffmpeg directly."""
+    output_path = os.path.join(output_dir, "audio.mp3")
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", input_path,
+            "-vn", "-acodec", "libmp3lame", "-q:a", "4",
+            "-ar", "16000",  # 16kHz is sufficient for speech transcription
+            output_path
+        ],
+        capture_output=True, text=True
+    )
+    if not os.path.exists(output_path):
+        raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr[-500:]}")
+    return output_path
+
+
 def download_audio(url: str, output_dir: str) -> str:
-    """Download audio from a URL using yt-dlp. Returns path to downloaded audio file."""
-    # Check if login is required but cookies not provided
-    if any(p in url for p in LOGIN_REQUIRED_PATTERNS):
-        if "instagram.com" in url and not os.environ.get("INSTAGRAM_COOKIES"):
-            raise ValueError(
-                "Instagram requires login to download.\n\n"
-                "Please download the video manually and send it as a file to the bot, "
-                "or use a YouTube link instead."
-            )
+    """Download video from URL and extract audio. Returns path to mp3."""
+    if "instagram.com" in url and not os.environ.get("INSTAGRAM_COOKIES"):
+        raise ValueError(
+            "Instagram requires login to download.\n\n"
+            "Please download the video and send it as a file directly to the bot instead."
+        )
 
     cookies_file = _get_cookies_file(url, output_dir)
 
+    # Step 1: Download raw video (no postprocessing — avoids ffprobe codec issues)
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(output_dir, "audio.%(ext)s"),
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "96",
-        }],
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+        "outtmpl": os.path.join(output_dir, "video.%(ext)s"),
+        "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
-        "extract_flat": False,
     }
 
     if cookies_file:
@@ -63,38 +74,16 @@ def download_audio(url: str, output_dir: str) -> str:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-    output_path = os.path.join(output_dir, "audio.mp3")
-    if not os.path.exists(output_path):
-        raise FileNotFoundError("Audio download failed — file not found after download.")
+    # Step 2: Find the downloaded file
+    downloaded = (
+        glob.glob(os.path.join(output_dir, "video.*"))
+    )
+    downloaded = [f for f in downloaded if not f.endswith(".txt")]  # exclude cookies file
 
-    return output_path
+    if not downloaded:
+        raise FileNotFoundError("Download failed — no video file found after download.")
 
+    video_path = downloaded[0]
 
-def save_telegram_file(file_bytes: bytes, output_dir: str, extension: str = "mp4") -> str:
-    """Save bytes from a Telegram file to disk. Returns the file path."""
-    file_path = os.path.join(output_dir, f"video.{extension}")
-    with open(file_path, "wb") as f:
-        f.write(file_bytes)
-    return file_path
-
-
-def extract_audio_from_video(video_path: str, output_dir: str) -> str:
-    """Extract audio track from a local video file. Returns path to mp3."""
-    audio_path = os.path.join(output_dir, "audio.mp3")
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(output_dir, "audio.%(ext)s"),
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "96",
-        }],
-        "quiet": True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([f"file://{video_path}"])
-
-    if not os.path.exists(audio_path):
-        raise FileNotFoundError("Audio extraction failed.")
-
-    return audio_path
+    # Step 3: Extract audio with ffmpeg directly (no ffprobe codec detection needed)
+    return _extract_audio_ffmpeg(video_path, output_dir)
