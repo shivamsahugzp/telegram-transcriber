@@ -12,13 +12,38 @@ SUPPORTED_URL_PATTERNS = [
     "vimeo.com",
 ]
 
+LOGIN_REQUIRED_PATTERNS = ["instagram.com"]
+
 
 def is_supported_url(url: str) -> bool:
     return any(pattern in url for pattern in SUPPORTED_URL_PATTERNS) or url.startswith("http")
 
 
+def _get_cookies_file(url: str, tmp_dir: str) -> str | None:
+    """Write cookies from env var to a temp file if available for this URL."""
+    if "instagram.com" in url:
+        cookies = os.environ.get("INSTAGRAM_COOKIES")
+        if cookies:
+            cookies_path = os.path.join(tmp_dir, "cookies.txt")
+            with open(cookies_path, "w") as f:
+                f.write(cookies)
+            return cookies_path
+    return None
+
+
 def download_audio(url: str, output_dir: str) -> str:
     """Download audio from a URL using yt-dlp. Returns path to downloaded audio file."""
+    # Check if login is required but cookies not provided
+    if any(p in url for p in LOGIN_REQUIRED_PATTERNS):
+        if "instagram.com" in url and not os.environ.get("INSTAGRAM_COOKIES"):
+            raise ValueError(
+                "Instagram requires login to download.\n\n"
+                "Please download the video manually and send it as a file to the bot, "
+                "or use a YouTube link instead."
+            )
+
+    cookies_file = _get_cookies_file(url, output_dir)
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(output_dir, "audio.%(ext)s"),
@@ -31,6 +56,9 @@ def download_audio(url: str, output_dir: str) -> str:
         "no_warnings": True,
         "extract_flat": False,
     }
+
+    if cookies_file:
+        ydl_opts["cookiefile"] = cookies_file
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])

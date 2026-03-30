@@ -59,9 +59,19 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await status_msg.delete()
         await _send_transcript(update, transcript)
 
+    except ValueError as e:
+        # User-friendly errors (e.g. login required)
+        await status_msg.edit_text(f"⚠️ {str(e)}")
     except Exception as e:
         logger.error("Error processing URL %s: %s", url, e)
-        await status_msg.edit_text(f"❌ Failed to process video.\n\nError: {str(e)}")
+        err = str(e)
+        if "login required" in err.lower() or "rate-limit" in err.lower():
+            await status_msg.edit_text(
+                "⚠️ This platform requires login to download.\n\n"
+                "Please download the video and send it as a file directly to this bot instead."
+            )
+        else:
+            await status_msg.edit_text(f"❌ Failed to process video.\n\nError: {err}")
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
