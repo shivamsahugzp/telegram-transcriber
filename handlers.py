@@ -93,7 +93,8 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
         else:
             await status_msg.edit_text(
-                f"Something went wrong:\n\n`{str(e)[:300]}`"
+                "Something went wrong while processing that video. "
+                "Try sending the video file directly instead of a link."
             )
 
 
