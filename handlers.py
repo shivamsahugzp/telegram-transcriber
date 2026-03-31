@@ -10,6 +10,15 @@ logger = logging.getLogger(__name__)
 
 MAX_TELEGRAM_MSG_LEN = 4096
 
+# Per-user language preference: user_id -> language code (e.g. "hi", "en") or None for auto
+_user_lang: dict[int, str | None] = {}
+
+SUPPORTED_LANGS = {
+    "hi": "Hindi", "en": "English", "auto": "Auto-detect",
+    "ur": "Urdu", "mr": "Marathi", "ta": "Tamil", "te": "Telugu",
+    "gu": "Gujarati", "bn": "Bengali", "pa": "Punjabi",
+}
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
@@ -31,12 +40,49 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• Instagram, Twitter/X, Facebook\n"
         "• Direct video/audio URLs\n"
         "• Telegram video/audio files (upload directly)\n\n"
-        "*Languages:* Auto-detected (Hindi, English, and 97 more)\n\n"
+        "*Languages:* Auto-detected — use /setlang to pin a language\n\n"
         "*Commands:*\n"
         "/start — Welcome message\n"
-        "/help — This help message",
+        "/help — This help message\n"
+        "/setlang hi — Pin to Hindi (fixes Urdu mix-ups)\n"
+        "/setlang en — Pin to English\n"
+        "/setlang auto — Back to auto-detect",
         parse_mode="Markdown"
     )
+
+
+async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    args = context.args
+
+    if not args:
+        current = _user_lang.get(user_id)
+        current_name = SUPPORTED_LANGS.get(current, "Auto-detect") if current else "Auto-detect"
+        lang_list = "\n".join(f"  `/setlang {code}` — {name}" for code, name in SUPPORTED_LANGS.items())
+        await update.message.reply_text(
+            f"Current language: *{current_name}*\n\n"
+            f"Available options:\n{lang_list}",
+            parse_mode="Markdown"
+        )
+        return
+
+    lang = args[0].lower().strip()
+    if lang == "auto":
+        _user_lang[user_id] = None
+        await update.message.reply_text("Language set to *Auto-detect*.", parse_mode="Markdown")
+    elif lang in SUPPORTED_LANGS:
+        _user_lang[user_id] = lang
+        await update.message.reply_text(
+            f"Language pinned to *{SUPPORTED_LANGS[lang]}*. All transcripts will use this now.\n"
+            "Use `/setlang auto` to switch back to auto-detect.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"Unknown language code `{lang}`.\n"
+            "Try `/setlang hi` for Hindi, `/setlang en` for English, or `/setlang auto` for auto-detect.",
+            parse_mode="Markdown"
+        )
 
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,11 +98,14 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     status_msg = await update.message.reply_text("Got it! Downloading the video now...")
 
     try:
+        user_id = update.effective_user.id
+        language = _user_lang.get(user_id)
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             audio_path = download_audio(url, tmp_dir)
 
             await status_msg.edit_text("Transcribing now... this usually takes 30–60 seconds ⏳")
-            transcript = transcribe_file(audio_path)
+            transcript = transcribe_file(audio_path, language=language)
 
         await status_msg.delete()
         await _send_transcript(update, transcript)
@@ -109,6 +158,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     status_msg = await message.reply_text("Got it! Give me a moment to process this...")
 
     try:
+        user_id = update.effective_user.id
+        language = _user_lang.get(user_id)
         file = await context.bot.get_file(file_obj.file_id)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -134,7 +185,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     "-vn", "-acodec", "libmp3lame", "-q:a", "4", audio_path
                 ], capture_output=True)
 
-            transcript = transcribe_file(audio_path)
+            transcript = transcribe_file(audio_path, language=language)
 
         await status_msg.delete()
         await _send_transcript(update, transcript)

@@ -24,13 +24,15 @@ def transcribe_file(audio_path: str, language: str = None) -> str:
     return _transcribe_single(client, audio_path, language)
 
 
-def _transcribe_single(client: Groq, audio_path: str, language: str = None) -> str:
+def _transcribe_single(client: Groq, audio_path: str, language: str = None, prompt: str = None) -> str:
     kwargs = {
         "model": GROQ_MODEL,
         "response_format": "text",
     }
     if language:
         kwargs["language"] = language
+    if prompt:
+        kwargs["prompt"] = prompt
 
     with open(audio_path, "rb") as audio_file:
         result = client.audio.transcriptions.create(
@@ -60,6 +62,7 @@ def _transcribe_in_chunks(audio_path: str, language: str = None) -> str:
 
     client = get_client()
     transcripts = []
+    prev_text = ""
 
     with tempfile.TemporaryDirectory() as chunk_dir:
         for i in range(num_chunks):
@@ -73,7 +76,11 @@ def _transcribe_in_chunks(audio_path: str, language: str = None) -> str:
                 chunk_path
             ], capture_output=True)
 
-            chunk_text = _transcribe_single(client, chunk_path, language)
-            transcripts.append(chunk_text.strip())
+            # Pass last ~200 chars of previous chunk as prompt for continuity
+            prompt = " ".join(prev_text.split()[-30:]) if prev_text else None
+            chunk_text = _transcribe_single(client, chunk_path, language, prompt=prompt)
+            chunk_text = chunk_text.strip()
+            transcripts.append(chunk_text)
+            prev_text = chunk_text
 
     return "\n\n".join(transcripts)
