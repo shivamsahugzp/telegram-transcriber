@@ -157,10 +157,35 @@ def _transcribe_in_chunks(
     return "\n\n".join(transcripts)
 
 
-def _apply_format(client: Groq, text: str, output_format: str) -> str:
-    """Use LLM to clean/translate/transliterate the raw Whisper transcript."""
-    system_prompt = _FORMAT_PROMPTS.get(output_format, _FORMAT_PROMPTS["hi"])
+def _devanagari_to_roman(text: str) -> str:
+    """Mechanical character-level transliteration — no word changes possible."""
+    from indic_transliteration import sanscript
+    from indic_transliteration.sanscript import transliterate
 
+    result = transliterate(text, sanscript.DEVANAGARI, sanscript.ITRANS)
+
+    # Make ITRANS output more readable as colloquial Hinglish
+    replacements = [
+        ("aa", "aa"), ("A", "aa"),
+        ("ii", "ee"), ("I", "ee"),
+        ("uu", "oo"), ("U", "oo"),
+        ("M", "n"),   (".n", "n"),
+        (".h", ""),   ("~", ""),
+    ]
+    for old, new in replacements:
+        result = result.replace(old, new)
+
+    return result
+
+
+def _apply_format(client: Groq, text: str, output_format: str) -> str:
+    """Convert transcript to the requested output format."""
+    if output_format == "hinglish":
+        # Pure mechanical transliteration — no LLM, no word changes
+        return _devanagari_to_roman(text)
+
+    # For hi and en, use LLM (cleanup/translation only)
+    system_prompt = _FORMAT_PROMPTS.get(output_format, _FORMAT_PROMPTS["hi"])
     response = client.chat.completions.create(
         model=LLM_MODEL,
         messages=[
