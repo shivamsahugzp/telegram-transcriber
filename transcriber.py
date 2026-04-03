@@ -15,12 +15,9 @@ CHUNK_SECONDS = 15  # shorter chunks = fewer skipped lines
 
 # Urdu/Hindi shayri vocabulary — helps Whisper recognise poetic words correctly
 WHISPER_INITIAL_PROMPT = (
-    "Shayri, ghazal, nazm, Urdu poetry. "
-    "tere, khwaab, dil, mohabbat, aankhein, raat, tanha, zindagi, ishq, wafa, "
-    "farhad, majnu, janaze, tarashe, tamashe, dilaase, rukhsat, mukhtasar, "
-    "khulase, yaaron, lifaafe, khat, gam, dard, waqt, khair, khabar, bimaar, "
-    "intezaar, judaai, ghayal, sitam, zaalim, mehfil, shama, parwana, aashiq. "
-    "Transcribe every word exactly as spoken in Hinglish Roman script."
+    "شاعری، غزل، نظم۔ "
+    "فرہاد، مجنوں، جنازہ، تراشے، تماشے، دلاسے، رخصت، مختصر، خلاصے، یاروں، "
+    "لفافے، خط، غم، درد، وقت، خیر، خبر، بیمار، انتظار، جدائی، محفل، عاشق۔"
 )
 
 _FORMAT_PROMPTS: dict[str, str] = {
@@ -39,17 +36,21 @@ _FORMAT_PROMPTS: dict[str, str] = {
         "Output only the translated text."
     ),
     "hinglish": (
-        "You are a Hinglish shayri formatter. The input is already in Hinglish Roman script — "
-        "it came directly from Whisper transcription of Urdu/Hindi shayri.\n\n"
-        "Your ONLY jobs:\n"
-        "1. Fix obvious Whisper mishearings using your knowledge of Urdu shayri vocabulary "
-        "(e.g. 'parwaad' → 'farhad', 'janaade' → 'janaze', 'taraache' → 'tarashe', "
-        "'tamache' → 'tamashe', 'dilaate' → 'dilaase', 'rukhteeti' → 'rukhsat')\n"
-        "2. Put each sher/line on its own line\n"
-        "3. Do NOT add, remove, or rearrange any lines\n"
-        "4. Do NOT translate anything\n"
-        "5. Do NOT paraphrase or change any word unless it is clearly a Whisper mishearing\n\n"
-        "Output only the corrected Hinglish shayri, one line per sher."
+        "You are converting Devanagari Hindi/Urdu shayri into Hinglish Roman script.\n\n"
+        "Input: Devanagari text from Whisper (may have errors).\n"
+        "Output: Roman script Hinglish — phonetic transliteration of every word.\n\n"
+        "RULES:\n"
+        "1. Transliterate every Devanagari word into Roman letters phonetically.\n"
+        "2. Fix clear Whisper mishearings using Urdu shayri knowledge. Examples:\n"
+        "   तराचे→tarashe, तमाचे→tamashe, दिलाते→dilaase, जनादे→janaze, "
+        "   परवाद→farhad, रुखतीती→rukhsat, मुखतसर→mukhtasar, जारो→yaaron\n"
+        "3. Do NOT translate — 'dil' not 'heart', 'raat' not 'night'\n"
+        "4. Do NOT skip or add any lines\n"
+        "5. Put each sher on its own line\n"
+        "6. Output ONLY Roman script — no Devanagari characters at all\n\n"
+        "Example:\n"
+        "Input: तेरे ख्वाबों में सो जाता हूँ मैं\n"
+        "Output: tere khwabon mein so jaata hoon main"
     ),
 }
 
