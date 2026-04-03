@@ -4,32 +4,44 @@ import subprocess
 import tempfile
 from groq import Groq
 
-MAX_FILE_SIZE_BYTES = 24 * 1024 * 1024  # 25MB Groq limit (1MB buffer)
+MAX_FILE_SIZE_BYTES = 24 * 1024 * 1024  # 25 MB Groq limit (1 MB buffer)
 WHISPER_MODEL = "whisper-large-v3"
 LLM_MODEL = "llama-3.3-70b-versatile"
-
-# Default to Hindi — prevents Whisper from mis-detecting as Urdu
 DEFAULT_LANGUAGE = "hi"
+
+# Hint Whisper it's processing speech, not music — reduces hallucinations
+WHISPER_INITIAL_PROMPT = (
+    "This is a Hindi and English conversation. "
+    "Transcribe only the spoken words. Ignore background music."
+)
 
 _FORMAT_PROMPTS: dict[str, str] = {
     "hi": (
-        "You are a transcript cleaner. The input is a raw Hindi transcript "
-        "(may contain some English words). Output it cleaned up in proper Hindi "
-        "Devanagari script. Fix any obvious errors, remove filler words like 'um', "
-        "'uh', 'aaa'. Do NOT translate — keep the language as Hindi. "
-        "Return only the cleaned transcript, nothing else."
+        "You are a Hindi transcript editor. "
+        "The input is a raw Whisper transcription of Hindi/English speech. "
+        "Clean it up: fix spelling errors, remove filler sounds like 'um', 'uh', 'hmm', 'aaa'. "
+        "Write everything in proper Devanagari script. Keep English words that were spoken in English. "
+        "Do NOT translate. Output only the cleaned transcript."
     ),
     "en": (
-        "You are a professional translator. Translate the following Hindi transcript "
-        "into fluent, natural English. Preserve the meaning and tone. "
-        "Return only the translated text, nothing else."
+        "You are a professional Hindi-to-English translator. "
+        "Translate the following Hindi transcript into natural, fluent English. "
+        "Preserve tone and meaning. Keep any proper nouns or brand names as-is. "
+        "Output only the translated text, nothing else."
     ),
     "hinglish": (
-        "You are a Hinglish writer. Rewrite the following Hindi transcript in Hinglish — "
-        "Roman script (English alphabet) representation of Hindi speech, mixed naturally "
-        "with English words as Indians speak in everyday conversation. "
-        "Example style: 'Aaj main ek naya project shuru kar raha hoon jo bahut exciting hai.' "
-        "Return only the Hinglish text, nothing else."
+        "You are a Hinglish writer. Rewrite the Hindi transcript in Hinglish — "
+        "Roman script that sounds exactly like how urban Indians speak casually, "
+        "mixing Hindi and English naturally in the same sentence.\n\n"
+        "Rules:\n"
+        "- Write Hindi words phonetically in Roman letters (e.g. 'kar raha hoon', 'bahut acha')\n"
+        "- Keep English words that were spoken in English exactly as-is\n"
+        "- Do NOT translate Hindi to English — just romanize it\n"
+        "- Match the original sentence structure\n\n"
+        "Example:\n"
+        "Input: मैं आज एक नया project शुरू कर रहा हूं जो बहुत exciting है।\n"
+        "Output: Main aaj ek naya project shuru kar raha hoon jo bahut exciting hai.\n\n"
+        "Output only the Hinglish text, nothing else."
     ),
 }
 
@@ -41,9 +53,14 @@ def get_client() -> Groq:
     return Groq(api_key=api_key)
 
 
-def transcribe_file(audio_path: str, language: str | None = None, output_format: str = "hi") -> str:
+def transcribe_file(
+    audio_path: str,
+    language: str | None = None,
+    output_format: str = "hi",
+) -> str:
     """Transcribe audio and convert to the requested output format."""
-    lang = language if language else DEFAULT_LANGUAGE
+    # None means "use default"; "auto" means genuine Whisper auto-detect
+    lang = None if language == "auto" else (language or DEFAULT_LANGUAGE)
     client = get_client()
     file_size = os.path.getsize(audio_path)
 
@@ -52,19 +69,31 @@ def transcribe_file(audio_path: str, language: str | None = None, output_format:
     else:
         raw = _transcribe_single(client, audio_path, lang)
 
-    return _apply_format(client, raw.strip(), output_format)
+    raw = raw.strip()
+    if not raw:
+        return ""
+
+    return _apply_format(client, raw, output_format)
 
 
 def _transcribe_single(
-    client: Groq, audio_path: str, language: str, prompt: str | None = None
+    client: Groq,
+    audio_path: str,
+    language: str | None,
+    prompt: str | None = None,
 ) -> str:
+    # Build prompt: chain initial hint + continuity context from previous chunk
+    combined_prompt = WHISPER_INITIAL_PROMPT
+    if prompt:
+        combined_prompt = combined_prompt + " " + prompt
+
     kwargs: dict = {
         "model": WHISPER_MODEL,
         "response_format": "text",
-        "language": language,
+        "prompt": combined_prompt,
     }
-    if prompt:
-        kwargs["prompt"] = prompt
+    if language:
+        kwargs["language"] = language
 
     with open(audio_path, "rb") as f:
         result = client.audio.transcriptions.create(
@@ -75,14 +104,20 @@ def _transcribe_single(
     return result if isinstance(result, str) else result.text
 
 
-def _transcribe_in_chunks(client: Groq, audio_path: str, language: str) -> str:
+def _transcribe_in_chunks(
+    client: Groq, audio_path: str, language: str | None
+) -> str:
     """Split large audio into chunks and transcribe with context continuity."""
     file_size = os.path.getsize(audio_path)
     num_chunks = math.ceil(file_size / MAX_FILE_SIZE_BYTES)
 
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            audio_path,
+        ],
         capture_output=True, text=True,
     )
     total_duration = float(probe.stdout.strip())
@@ -96,23 +131,30 @@ def _transcribe_in_chunks(client: Groq, audio_path: str, language: str) -> str:
             start = i * chunk_duration
             chunk_path = os.path.join(chunk_dir, f"chunk_{i}.mp3")
 
-            subprocess.run([
-                "ffmpeg", "-y", "-i", audio_path,
-                "-ss", str(start), "-t", str(chunk_duration),
-                "-acodec", "libmp3lame", "-q:a", "2",
-                chunk_path,
-            ], capture_output=True)
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", audio_path,
+                    "-ss", str(start), "-t", str(chunk_duration),
+                    "-acodec", "libmp3lame", "-q:a", "2",
+                    chunk_path,
+                ],
+                capture_output=True,
+            )
 
-            prompt = " ".join(prev_text.split()[-30:]) if prev_text else None
-            chunk_text = _transcribe_single(client, chunk_path, language, prompt=prompt).strip()
-            transcripts.append(chunk_text)
-            prev_text = chunk_text
+            # Last 30 words of previous chunk = continuity context
+            context = " ".join(prev_text.split()[-30:]) if prev_text else None
+            chunk_text = _transcribe_single(client, chunk_path, language, prompt=context).strip()
+
+            # Skip chunks that are clearly just music/noise (very short or empty)
+            if len(chunk_text) > 5:
+                transcripts.append(chunk_text)
+                prev_text = chunk_text
 
     return "\n\n".join(transcripts)
 
 
 def _apply_format(client: Groq, text: str, output_format: str) -> str:
-    """Use LLM to clean/translate/transliterate the raw transcript."""
+    """Use LLM to clean/translate/transliterate the raw Whisper transcript."""
     system_prompt = _FORMAT_PROMPTS.get(output_format, _FORMAT_PROMPTS["hi"])
 
     response = client.chat.completions.create(
@@ -121,7 +163,7 @@ def _apply_format(client: Groq, text: str, output_format: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text},
         ],
-        temperature=0.2,
+        temperature=0.1,
         max_tokens=4096,
     )
     return response.choices[0].message.content.strip()

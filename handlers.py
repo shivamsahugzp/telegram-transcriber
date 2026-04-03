@@ -77,7 +77,7 @@ async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     lang = args[0].lower().strip()
     if lang == "auto":
-        _user_lang[user_id] = None
+        _user_lang[user_id] = "auto"
         await update.message.reply_text("Language set to *Auto-detect*.", parse_mode="Markdown")
     elif lang in SUPPORTED_LANGS:
         _user_lang[user_id] = lang
@@ -145,7 +145,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         with tempfile.TemporaryDirectory() as tmp_dir:
             audio_path = download_audio(url, tmp_dir)
 
-            await status_msg.edit_text("Transcribing now... this usually takes 30–60 seconds ⏳")
+            await status_msg.edit_text("Transcribing and formatting... usually takes 30–90 seconds ⏳")
             transcript = transcribe_file(audio_path, language=language, output_format=output_format)
 
         await status_msg.delete()
@@ -215,7 +215,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             file_path = os.path.join(tmp_dir, f"input.{extension}")
             await file.download_to_drive(file_path)
 
-            await status_msg.edit_text("Transcribing now... this usually takes 30–60 seconds ⏳")
+            await status_msg.edit_text("Transcribing and formatting... usually takes 30–90 seconds ⏳")
 
             if extension in ("mp3", "ogg", "m4a", "wav"):
                 audio_path = file_path

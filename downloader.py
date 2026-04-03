@@ -33,16 +33,21 @@ def _get_cookies_file(url: str, tmp_dir: str) -> str | None:
 
 
 def _extract_audio_ffmpeg(input_path: str, output_dir: str) -> str:
-    """Extract audio from any video/audio file using ffmpeg directly."""
+    """Extract and speech-enhance audio from video using ffmpeg."""
     output_path = os.path.join(output_dir, "audio.mp3")
+    # highpass=f=80  — removes bass/music rumble below 80Hz
+    # dynaudnorm     — normalises volume so quiet speech isn't drowned out
+    # These two filters together greatly reduce background music interference
     result = subprocess.run(
         [
             "ffmpeg", "-y", "-i", input_path,
-            "-vn", "-acodec", "libmp3lame", "-q:a", "4",
-            "-ar", "16000",  # 16kHz is sufficient for speech transcription
-            output_path
+            "-vn",
+            "-af", "highpass=f=80,dynaudnorm",
+            "-acodec", "libmp3lame", "-q:a", "2",
+            "-ar", "16000",
+            output_path,
         ],
-        capture_output=True, text=True
+        capture_output=True, text=True,
     )
     if not os.path.exists(output_path):
         raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr[-500:]}")
