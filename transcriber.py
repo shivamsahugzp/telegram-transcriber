@@ -9,10 +9,7 @@ WHISPER_MODEL = "whisper-large-v3"
 LLM_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_LANGUAGE = "hi"
 
-# Prompt in Devanagari — forces Whisper to output Hindi script, not translate to English
-WHISPER_INITIAL_PROMPT = (
-    "यह हिंदी और इंग्लिश में बातचीत है। जो बोला गया है वो हिंदी में लिखें। अनुवाद मत करें।"
-)
+WHISPER_INITIAL_PROMPT = None
 
 _FORMAT_PROMPTS: dict[str, str] = {
     "hi": (
@@ -85,18 +82,17 @@ def _transcribe_single(
     language: str | None,
     prompt: str | None = None,
 ) -> str:
-    # Build prompt: chain initial hint + continuity context from previous chunk
-    combined_prompt = WHISPER_INITIAL_PROMPT
-    if prompt:
-        combined_prompt = combined_prompt + " " + prompt
+    # Only pass prompt if we have continuity context from previous chunk
+    combined_prompt = prompt if prompt else None
 
     kwargs: dict = {
         "model": WHISPER_MODEL,
         "response_format": "text",
-        "prompt": combined_prompt,
     }
     if language:
         kwargs["language"] = language
+    if combined_prompt:
+        kwargs["prompt"] = combined_prompt
 
     with open(audio_path, "rb") as f:
         result = client.audio.transcriptions.create(
