@@ -5,9 +5,11 @@ from handlers import (
     start_command, help_command,
     setlang_command, setformat_command,
     approve_command, deny_command,
+    correct_command, vocab_command, forget_command,
     handle_url, handle_video,
 )
 import auth
+import vocab
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -26,6 +28,7 @@ def main() -> None:
         raise EnvironmentError("GROQ_API_KEY environment variable is not set.")
 
     auth.init()
+    vocab.init()
 
     app = Application.builder().token(token).build()
 
@@ -35,6 +38,9 @@ def main() -> None:
     app.add_handler(CommandHandler("setformat", setformat_command))
     app.add_handler(CommandHandler("approve", approve_command))
     app.add_handler(CommandHandler("deny", deny_command))
+    app.add_handler(CommandHandler("correct", correct_command))
+    app.add_handler(CommandHandler("vocab", vocab_command))
+    app.add_handler(CommandHandler("forget", forget_command))
 
     # URL messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))

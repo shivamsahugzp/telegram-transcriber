@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 from downloader import download_audio, is_supported_url
 from transcriber import transcribe_file
 import auth
+import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,50 @@ async def setformat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+async def correct_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /correct <galat_word> <sahi_word>\n"
+            "Example: /correct janaade janaze"
+        )
+        return
+    wrong, correct = context.args[0].lower(), context.args[1].lower()
+    vocab.add(wrong, correct)
+    await update.message.reply_text(
+        f"Got it! '{wrong}' → '{correct}' added. "
+        f"I'll use this in all future transcripts."
+    )
+
+
+async def vocab_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
+    learned = vocab.learned_corrections()
+    if not learned:
+        await update.message.reply_text(
+            "No corrections learned yet.\n"
+            "Use /correct <galat> <sahi> after any transcript."
+        )
+        return
+    lines = "\n".join(f"• {w} → {c}" for w, c in learned.items())
+    await update.message.reply_text(f"Learned corrections ({len(learned)}):\n{lines}")
+
+
+async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /forget <galat_word>")
+        return
+    word = context.args[0].lower()
+    if vocab.remove(word):
+        await update.message.reply_text(f"Removed correction for '{word}'.")
+    else:
+        await update.message.reply_text(f"'{word}' not found in learned corrections.")
+
+
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _check_access(update, context):
         return
@@ -394,3 +439,9 @@ async def _send_transcript(update: Update, transcript: str) -> None:
         with open(tmp_path, "rb") as f:
             await update.message.reply_document(document=f, filename="transcript.txt")
         os.unlink(tmp_path)
+
+    # Nudge user to teach the bot corrections
+    await update.message.reply_text(
+        "Koi word galat hua? Use /correct <galat> <sahi> to teach me.\n"
+        "Example: /correct janaade janaze"
+    )

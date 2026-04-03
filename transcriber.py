@@ -3,6 +3,7 @@ import math
 import subprocess
 import tempfile
 from groq import Groq
+import vocab
 
 MAX_FILE_SIZE_BYTES = 24 * 1024 * 1024  # 25 MB Groq limit
 WHISPER_MODEL = "whisper-large-v3"
@@ -14,11 +15,21 @@ DEFAULT_LANGUAGE = "hi"
 CHUNK_SECONDS = 15  # shorter chunks = fewer skipped lines
 
 # Urdu/Hindi shayri vocabulary — helps Whisper recognise poetic words correctly
-WHISPER_INITIAL_PROMPT = (
+_WHISPER_BASE_PROMPT = (
     "شاعری، غزل، نظم۔ "
     "فرہاد، مجنوں، جنازہ، تراشے، تماشے، دلاسے، رخصت، مختصر، خلاصے، یاروں، "
     "لفافے، خط، غم، درد، وقت، خیر، خبر، بیمار، انتظار، جدائی، محفل، عاشق۔"
 )
+
+
+def _build_whisper_prompt(context: str | None = None) -> str:
+    parts = [_WHISPER_BASE_PROMPT]
+    extra = vocab.whisper_hint_words()
+    if extra:
+        parts.append(extra)
+    if context:
+        parts.append(context)
+    return " ".join(parts)
 
 _FORMAT_PROMPTS: dict[str, str] = {
     "hi": (
@@ -44,6 +55,7 @@ _FORMAT_PROMPTS: dict[str, str] = {
         "2. Fix clear Whisper mishearings using Urdu shayri knowledge. Examples:\n"
         "   तराचे→tarashe, तमाचे→tamashe, दिलाते→dilaase, जनादे→janaze, "
         "   परवाद→farhad, रुखतीती→rukhsat, मुखतसर→mukhtasar, जारो→yaaron\n"
+        "   {corrections}\n"
         "3. Do NOT translate — 'dil' not 'heart', 'raat' not 'night'\n"
         "4. Do NOT skip or add any lines\n"
         "5. Put each sher on its own line\n"
@@ -87,9 +99,7 @@ def _transcribe_single(
     language: str | None,
     prompt: str | None = None,
 ) -> str:
-    combined_prompt = WHISPER_INITIAL_PROMPT
-    if prompt:
-        combined_prompt = combined_prompt + " " + prompt
+    combined_prompt = _build_whisper_prompt(context=prompt)
 
     kwargs: dict = {
         "model": WHISPER_MODEL,
@@ -164,7 +174,8 @@ def _transcribe_in_chunks(
 
 
 def _apply_format(client: Groq, text: str, output_format: str) -> str:
-    system_prompt = _FORMAT_PROMPTS.get(output_format, _FORMAT_PROMPTS["hi"])
+    template = _FORMAT_PROMPTS.get(output_format, _FORMAT_PROMPTS["hi"])
+    system_prompt = template.replace("{corrections}", vocab.llm_correction_examples())
 
     response = client.chat.completions.create(
         model=LLM_MODEL,
