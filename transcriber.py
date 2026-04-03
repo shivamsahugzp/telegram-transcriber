@@ -157,25 +157,34 @@ def _transcribe_in_chunks(
     return "\n\n".join(transcripts)
 
 
-def _devanagari_to_roman(text: str) -> str:
-    """Mechanical character-level transliteration — no word changes possible."""
+def _transliterate_word(word: str) -> str:
+    """Transliterate a single word only if it contains Devanagari characters."""
+    import re
     from indic_transliteration import sanscript
     from indic_transliteration.sanscript import transliterate
 
-    result = transliterate(text, sanscript.DEVANAGARI, sanscript.ITRANS)
+    if not re.search(r"[\u0900-\u097F]", word):
+        return word  # Already Latin/English — leave completely untouched
 
-    # Make ITRANS output more readable as colloquial Hinglish
-    replacements = [
-        ("aa", "aa"), ("A", "aa"),
-        ("ii", "ee"), ("I", "ee"),
-        ("uu", "oo"), ("U", "oo"),
-        ("M", "n"),   (".n", "n"),
-        (".h", ""),   ("~", ""),
-    ]
-    for old, new in replacements:
-        result = result.replace(old, new)
+    result = transliterate(word, sanscript.DEVANAGARI, sanscript.ITRANS)
 
+    # Make ITRANS more readable — only applied to just-transliterated text
+    result = result.replace("A", "aa")
+    result = result.replace("I", "ee")
+    result = result.replace("U", "oo")
+    result = result.replace("M", "n")
+    result = result.replace(".n", "n")
+    result = result.replace(".h", "")
+    result = result.replace("~", "")
     return result
+
+
+def _devanagari_to_roman(text: str) -> str:
+    """Word-level transliteration — Devanagari words converted, English words untouched."""
+    import re
+    # Split on whitespace but preserve punctuation attached to words
+    tokens = re.split(r"(\s+)", text)
+    return "".join(_transliterate_word(t) for t in tokens)
 
 
 def _apply_format(client: Groq, text: str, output_format: str) -> str:
