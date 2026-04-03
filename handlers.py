@@ -381,11 +381,8 @@ async def _send_transcript(update: Update, transcript: str) -> None:
         )
         return
 
-    header = "📝 *Here's your transcript:*\n\n"
-    full_text = header + transcript
-
-    if len(full_text) <= MAX_TELEGRAM_MSG_LEN:
-        await update.message.reply_text(full_text, parse_mode="Markdown")
+    if len(transcript) <= MAX_TELEGRAM_MSG_LEN:
+        await update.message.reply_text(transcript)
     else:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
             f.write(transcript)

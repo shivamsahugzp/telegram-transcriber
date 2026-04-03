@@ -11,13 +11,16 @@ DEFAULT_LANGUAGE = "hi"
 
 # 30-second chunks — Whisper processes audio in 30s windows internally.
 # Forcing this prevents it from stopping early on long videos with background music.
-CHUNK_SECONDS = 30
+CHUNK_SECONDS = 15  # shorter chunks = fewer skipped lines
 
-# Shayri vocabulary hints help Whisper recognise poetic Hindi words correctly
+# Urdu/Hindi shayri vocabulary — helps Whisper recognise poetic words correctly
 WHISPER_INITIAL_PROMPT = (
-    "Shayri, ghazal, Hindi poetry. "
-    "tere, khwaab, dil, mohabbat, aankhein, raat, tanha, zindagi, ishq, wafa. "
-    "Transcribe every word exactly as spoken."
+    "Shayri, ghazal, nazm, Urdu poetry. "
+    "tere, khwaab, dil, mohabbat, aankhein, raat, tanha, zindagi, ishq, wafa, "
+    "farhad, majnu, janaze, tarashe, tamashe, dilaase, rukhsat, mukhtasar, "
+    "khulase, yaaron, lifaafe, khat, gam, dard, waqt, khair, khabar, bimaar, "
+    "intezaar, judaai, ghayal, sitam, zaalim, mehfil, shama, parwana, aashiq. "
+    "Transcribe every word exactly as spoken in Hinglish Roman script."
 )
 
 _FORMAT_PROMPTS: dict[str, str] = {
@@ -36,18 +39,17 @@ _FORMAT_PROMPTS: dict[str, str] = {
         "Output only the translated text."
     ),
     "hinglish": (
-        "You are transcribing Hindi shayri into Hinglish (Roman script). "
-        "Convert each Hindi word phonetically into Roman letters — word for word. "
-        "STRICT RULES:\n"
-        "- Do NOT change, replace or paraphrase ANY word. Ever.\n"
-        "- 'tere' stays 'tere'. 'khwaab' stays 'khwaab'. 'dil' stays 'dil'.\n"
-        "- Do NOT translate Hindi words into English.\n"
-        "- Keep English words as-is.\n"
-        "- Put each sher/line on its own line to preserve the poetic structure.\n\n"
-        "Example:\n"
-        "Input: तेरे ख्वाबों में सो जाता हूँ मैं\n"
-        "Output: tere khwabon mein so jaata hoon main\n\n"
-        "Output only the Hinglish text."
+        "You are a Hinglish shayri formatter. The input is already in Hinglish Roman script — "
+        "it came directly from Whisper transcription of Urdu/Hindi shayri.\n\n"
+        "Your ONLY jobs:\n"
+        "1. Fix obvious Whisper mishearings using your knowledge of Urdu shayri vocabulary "
+        "(e.g. 'parwaad' → 'farhad', 'janaade' → 'janaze', 'taraache' → 'tarashe', "
+        "'tamache' → 'tamashe', 'dilaate' → 'dilaase', 'rukhteeti' → 'rukhsat')\n"
+        "2. Put each sher/line on its own line\n"
+        "3. Do NOT add, remove, or rearrange any lines\n"
+        "4. Do NOT translate anything\n"
+        "5. Do NOT paraphrase or change any word unless it is clearly a Whisper mishearing\n\n"
+        "Output only the corrected Hinglish shayri, one line per sher."
     ),
 }
 
