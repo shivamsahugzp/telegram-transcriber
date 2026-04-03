@@ -5,6 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from downloader import download_audio, is_supported_url
 from transcriber import transcribe_file
+import auth
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +32,129 @@ SUPPORTED_FORMATS = {
 DEFAULT_FORMAT = "hi"
 
 
+async def _check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Return True if user is allowed. If not, handle request flow and return False."""
+    user = update.effective_user
+    user_id = user.id
+
+    if auth.is_approved(user_id):
+        return True
+
+    owner_id = auth.is_owner.__wrapped__(user_id) if hasattr(auth.is_owner, "__wrapped__") else None
+    # owner is always approved (already added in auth.init), so reaching here means not approved
+
+    if not auth.is_pending(user_id):
+        name = user.full_name or "Unknown"
+        username = f"@{user.username}" if user.username else "no username"
+        auth.add_pending(user_id, name, user.username)
+
+        await update.message.reply_text(
+            "This bot is private.\n\n"
+            "Your access request has been sent to the owner. "
+            "You'll be notified once approved."
+        )
+
+        # Notify owner
+        owner = int(os.environ.get("OWNER_TELEGRAM_ID", "0"))
+        if owner:
+            await context.bot.send_message(
+                chat_id=owner,
+                text=(
+                    f"*Access request*\n\n"
+                    f"Name: {name}\n"
+                    f"Username: {username}\n"
+                    f"ID: `{user_id}`\n\n"
+                    f"Reply `/approve {user_id}` to grant access\n"
+                    f"or `/deny {user_id}` to reject."
+                ),
+                parse_mode="Markdown",
+            )
+    else:
+        await update.message.reply_text(
+            "Your request is still pending. The owner will approve it soon."
+        )
+
+    return False
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not await _check_access(update, context):
+        return
+
     await update.message.reply_text(
-        "👋 *Video Transcriber Bot*\n\n"
+        f"👋 *Video Transcriber Bot*\n\n"
+        f"Your ID: `{user.id}`\n\n"
         "Send me:\n"
-        "• A YouTube / video URL\n"
+        "• A YouTube / Instagram / video URL\n"
         "• A video or audio file\n\n"
-        "I'll transcribe it for you — Hindi & English supported!\n\n"
-        "Just paste a link or forward a video to get started.",
+        "I'll transcribe it — Hindi, English, or Hinglish!\n\n"
+        "Use /help to see all commands.",
         parse_mode="Markdown"
     )
 
 
+async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not auth.is_owner(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/approve <user_id>`", parse_mode="Markdown")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+
+    info = auth.pending_info(target_id)
+    was_pending = auth.approve(target_id)
+    name = info["name"] if info else str(target_id)
+
+    await update.message.reply_text(f"✅ Approved *{name}* (`{target_id}`).", parse_mode="Markdown")
+
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text="✅ Your access has been approved! Send me a video link or file to get started.",
+        )
+    except Exception:
+        pass  # User may not have started the bot yet
+
+
+async def deny_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not auth.is_owner(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/deny <user_id>`", parse_mode="Markdown")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+
+    info = auth.pending_info(target_id)
+    auth.deny(target_id)
+    name = info["name"] if info else str(target_id)
+
+    await update.message.reply_text(f"❌ Denied *{name}* (`{target_id}`).", parse_mode="Markdown")
+
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text="Your access request was not approved.",
+        )
+    except Exception:
+        pass
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
     await update.message.reply_text(
         "*Supported sources:*\n"
         "• YouTube, Instagram, Twitter/X, Facebook\n"
@@ -61,6 +172,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
     user_id = update.effective_user.id
     args = context.args
 
@@ -95,6 +208,8 @@ async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def setformat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
     user_id = update.effective_user.id
     args = context.args
 
@@ -126,6 +241,9 @@ async def setformat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
+
     url = update.message.text.strip()
 
     if not is_supported_url(url):
@@ -189,6 +307,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _check_access(update, context):
+        return
+
     message = update.message
     file_obj = message.video or message.audio or message.voice or message.document
 
