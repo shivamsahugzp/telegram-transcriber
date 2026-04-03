@@ -9,39 +9,39 @@ WHISPER_MODEL = "whisper-large-v3"
 LLM_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_LANGUAGE = "hi"
 
-WHISPER_INITIAL_PROMPT = None
+# Hint Whisper it's processing speech, not music — reduces hallucinations
+WHISPER_INITIAL_PROMPT = (
+    "This is a Hindi and English conversation. "
+    "Transcribe only the spoken words. Ignore background music."
+)
 
 _FORMAT_PROMPTS: dict[str, str] = {
     "hi": (
-        "You are a transcript formatter. The input is a raw Whisper transcription of Hindi/English speech. "
-        "Your ONLY jobs are: remove filler sounds (um, uh, hmm, aaa), fix obvious Whisper spelling mistakes. "
-        "STRICT RULES — you will be penalised for breaking these:\n"
-        "- Do NOT change, replace, or paraphrase ANY word. 'tere' stays 'tere', 'khwaab' stays 'khwaab'.\n"
-        "- Do NOT translate or substitute synonyms.\n"
-        "- Do NOT rewrite sentences.\n"
-        "- Keep every Hindi and English word exactly as spoken.\n"
-        "Output only the lightly cleaned transcript in Devanagari script."
+        "You are a Hindi transcript editor. "
+        "The input is a raw Whisper transcription of Hindi/English speech. "
+        "Clean it up: fix spelling errors, remove filler sounds like 'um', 'uh', 'hmm', 'aaa'. "
+        "Write everything in proper Devanagari script. Keep English words that were spoken in English. "
+        "Do NOT translate. Output only the cleaned transcript."
     ),
     "en": (
-        "You are a literal translator. Translate the following Hindi transcript word-for-word into English. "
-        "STRICT RULES:\n"
-        "- Translate as literally as possible — do not paraphrase.\n"
-        "- Do not change the meaning or substitute words with synonyms.\n"
-        "- Keep proper nouns, names, and brand names exactly as-is.\n"
-        "Output only the translated text."
+        "You are a professional Hindi-to-English translator. "
+        "Translate the following Hindi transcript into natural, fluent English. "
+        "Preserve tone and meaning. Keep any proper nouns or brand names as-is. "
+        "Output only the translated text, nothing else."
     ),
     "hinglish": (
-        "You are a transliterator. Convert the Hindi Devanagari transcript into Roman script (Hinglish). "
-        "STRICT RULES — you will be penalised for breaking these:\n"
-        "- Transliterate each word phonetically, word-for-word. Do NOT change any word.\n"
-        "- 'तेरे' → 'tere' (not 'tumhare'). 'ख्वाब' → 'khwaab' (not 'sapne').\n"
-        "- Do NOT translate, paraphrase, or substitute synonyms. Ever.\n"
-        "- Keep English words that appear in the transcript exactly as-is.\n"
-        "- Preserve sentence structure exactly.\n\n"
+        "You are a Hinglish writer. Rewrite the Hindi transcript in Hinglish — "
+        "Roman script that sounds exactly like how urban Indians speak casually, "
+        "mixing Hindi and English naturally in the same sentence.\n\n"
+        "Rules:\n"
+        "- Write Hindi words phonetically in Roman letters (e.g. 'kar raha hoon', 'bahut acha')\n"
+        "- Keep English words that were spoken in English exactly as-is\n"
+        "- Do NOT translate Hindi to English — just romanize it\n"
+        "- Match the original sentence structure\n\n"
         "Example:\n"
-        "Input: तेरे ख्वाब मेरे दिल में हैं\n"
-        "Output: tere khwaab mere dil mein hain\n\n"
-        "Output only the transliterated text."
+        "Input: मैं आज एक नया project शुरू कर रहा हूं जो बहुत exciting है।\n"
+        "Output: Main aaj ek naya project shuru kar raha hoon jo bahut exciting hai.\n\n"
+        "Output only the Hinglish text, nothing else."
     ),
 }
 
@@ -82,17 +82,18 @@ def _transcribe_single(
     language: str | None,
     prompt: str | None = None,
 ) -> str:
-    # Only pass prompt if we have continuity context from previous chunk
-    combined_prompt = prompt if prompt else None
+    # Build prompt: chain initial hint + continuity context from previous chunk
+    combined_prompt = WHISPER_INITIAL_PROMPT
+    if prompt:
+        combined_prompt = combined_prompt + " " + prompt
 
     kwargs: dict = {
         "model": WHISPER_MODEL,
         "response_format": "text",
+        "prompt": combined_prompt,
     }
     if language:
         kwargs["language"] = language
-    if combined_prompt:
-        kwargs["prompt"] = combined_prompt
 
     with open(audio_path, "rb") as f:
         result = client.audio.transcriptions.create(
@@ -152,51 +153,17 @@ def _transcribe_in_chunks(
     return "\n\n".join(transcripts)
 
 
-def _transliterate_word(word: str) -> str:
-    """Transliterate a single word only if it contains Devanagari characters."""
-    import re
-    from indic_transliteration import sanscript
-    from indic_transliteration.sanscript import transliterate
-
-    if not re.search(r"[\u0900-\u097F]", word):
-        return word  # Already Latin/English — leave completely untouched
-
-    result = transliterate(word, sanscript.DEVANAGARI, sanscript.ITRANS)
-
-    # Make ITRANS more readable — only applied to just-transliterated text
-    result = result.replace("A", "aa")
-    result = result.replace("I", "ee")
-    result = result.replace("U", "oo")
-    result = result.replace("M", "n")
-    result = result.replace(".n", "n")
-    result = result.replace(".h", "")
-    result = result.replace("~", "")
-    return result
-
-
-def _devanagari_to_roman(text: str) -> str:
-    """Word-level transliteration — Devanagari words converted, English words untouched."""
-    import re
-    # Split on whitespace but preserve punctuation attached to words
-    tokens = re.split(r"(\s+)", text)
-    return "".join(_transliterate_word(t) for t in tokens)
-
-
 def _apply_format(client: Groq, text: str, output_format: str) -> str:
-    """Convert transcript to the requested output format."""
-    if output_format == "hinglish":
-        # Pure mechanical transliteration — no LLM, no word changes
-        return _devanagari_to_roman(text)
-
-    # For hi and en, use LLM (cleanup/translation only)
+    """Use LLM to clean/translate/transliterate the raw Whisper transcript."""
     system_prompt = _FORMAT_PROMPTS.get(output_format, _FORMAT_PROMPTS["hi"])
+
     response = client.chat.completions.create(
         model=LLM_MODEL,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text},
         ],
-        temperature=0.0,
+        temperature=0.1,
         max_tokens=4096,
     )
     return response.choices[0].message.content.strip()
