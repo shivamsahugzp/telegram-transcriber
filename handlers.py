@@ -29,7 +29,7 @@ SUPPORTED_FORMATS = {
     "hinglish": "Hinglish (Roman script, Hindi-English mix)",
 }
 
-DEFAULT_FORMAT = "hi"
+DEFAULT_FORMAT = os.environ.get("DEFAULT_FORMAT", "hi")
 
 
 async def _check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
