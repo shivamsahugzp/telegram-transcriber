@@ -34,6 +34,10 @@ DEFAULT_FORMAT = "hi"
 
 async def _check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Return True if user is allowed. If not, handle request flow and return False."""
+    # If owner hasn't configured their ID yet, allow everyone
+    if not auth.is_configured():
+        return True
+
     user = update.effective_user
     user_id = user.id
 

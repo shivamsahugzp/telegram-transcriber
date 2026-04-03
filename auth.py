@@ -25,6 +25,11 @@ def _load_allowed_from_env() -> set[int]:
     return ids
 
 
+def is_configured() -> bool:
+    """Returns False if OWNER_TELEGRAM_ID is not set — auth is disabled in this case."""
+    return bool(os.environ.get("OWNER_TELEGRAM_ID", "").strip())
+
+
 def init() -> None:
     """Call once on startup to load persisted approvals."""
     global _approved
@@ -32,6 +37,8 @@ def init() -> None:
     owner = _owner_id()
     if owner:
         _approved.add(owner)
+    if not is_configured():
+        logger.warning("OWNER_TELEGRAM_ID not set — auth disabled, all users allowed")
     logger.info("Auth initialised — %d approved user(s)", len(_approved))
 
 
