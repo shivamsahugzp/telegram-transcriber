@@ -10,14 +10,25 @@ logger = logging.getLogger(__name__)
 
 MAX_TELEGRAM_MSG_LEN = 4096
 
-# Per-user language preference: user_id -> language code (e.g. "hi", "en") or None for auto
+# Per-user language preference for Whisper input (None = default Hindi)
 _user_lang: dict[int, str | None] = {}
+
+# Per-user output format preference
+_user_format: dict[int, str] = {}
 
 SUPPORTED_LANGS = {
     "hi": "Hindi", "en": "English", "auto": "Auto-detect",
     "ur": "Urdu", "mr": "Marathi", "ta": "Tamil", "te": "Telugu",
     "gu": "Gujarati", "bn": "Bengali", "pa": "Punjabi",
 }
+
+SUPPORTED_FORMATS = {
+    "hi": "Hindi (Devanagari script)",
+    "en": "English (translated)",
+    "hinglish": "Hinglish (Roman script, Hindi-English mix)",
+}
+
+DEFAULT_FORMAT = "hi"
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -35,18 +46,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "*Supported sources:*\n"
-        "• YouTube\n"
+        "• YouTube, Instagram, Twitter/X, Facebook\n"
         "• Google Drive (public links)\n"
-        "• Instagram, Twitter/X, Facebook\n"
         "• Direct video/audio URLs\n"
         "• Telegram video/audio files (upload directly)\n\n"
-        "*Languages:* Auto-detected — use /setlang to pin a language\n\n"
         "*Commands:*\n"
-        "/start — Welcome message\n"
-        "/help — This help message\n"
-        "/setlang hi — Pin to Hindi (fixes Urdu mix-ups)\n"
-        "/setlang en — Pin to English\n"
-        "/setlang auto — Back to auto-detect",
+        "/setformat hi — Output in Hindi (Devanagari)\n"
+        "/setformat en — Output translated to English\n"
+        "/setformat hinglish — Output in Hinglish (Roman script)\n"
+        "/setlang — Change Whisper input language\n"
+        "/help — This message",
         parse_mode="Markdown"
     )
 
@@ -85,6 +94,37 @@ async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
+async def setformat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    args = context.args
+
+    if not args:
+        current = _user_format.get(user_id, DEFAULT_FORMAT)
+        current_name = SUPPORTED_FORMATS.get(current, current)
+        fmt_list = "\n".join(f"  `/setformat {code}` — {name}" for code, name in SUPPORTED_FORMATS.items())
+        await update.message.reply_text(
+            f"Current output format: *{current_name}*\n\n"
+            f"Available formats:\n{fmt_list}",
+            parse_mode="Markdown"
+        )
+        return
+
+    fmt = args[0].lower().strip()
+    if fmt in SUPPORTED_FORMATS:
+        _user_format[user_id] = fmt
+        await update.message.reply_text(
+            f"Output format set to *{SUPPORTED_FORMATS[fmt]}*.\n"
+            "Your next transcript will use this format.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"Unknown format `{fmt}`.\n"
+            "Use `/setformat hi`, `/setformat en`, or `/setformat hinglish`.",
+            parse_mode="Markdown"
+        )
+
+
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     url = update.message.text.strip()
 
@@ -100,12 +140,13 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         user_id = update.effective_user.id
         language = _user_lang.get(user_id)
+        output_format = _user_format.get(user_id, DEFAULT_FORMAT)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             audio_path = download_audio(url, tmp_dir)
 
             await status_msg.edit_text("Transcribing now... this usually takes 30–60 seconds ⏳")
-            transcript = transcribe_file(audio_path, language=language)
+            transcript = transcribe_file(audio_path, language=language, output_format=output_format)
 
         await status_msg.delete()
         await _send_transcript(update, transcript)
@@ -160,6 +201,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         user_id = update.effective_user.id
         language = _user_lang.get(user_id)
+        output_format = _user_format.get(user_id, DEFAULT_FORMAT)
         file = await context.bot.get_file(file_obj.file_id)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -185,7 +227,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     "-vn", "-acodec", "libmp3lame", "-q:a", "4", audio_path
                 ], capture_output=True)
 
-            transcript = transcribe_file(audio_path, language=language)
+            transcript = transcribe_file(audio_path, language=language, output_format=output_format)
 
         await status_msg.delete()
         await _send_transcript(update, transcript)
