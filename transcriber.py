@@ -9,10 +9,9 @@ WHISPER_MODEL = "whisper-large-v3"
 LLM_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_LANGUAGE = "hi"
 
-# Hint Whisper it's processing speech, not music — reduces hallucinations
+# Prompt in Devanagari — forces Whisper to output Hindi script, not translate to English
 WHISPER_INITIAL_PROMPT = (
-    "This is a Hindi and English conversation. "
-    "Transcribe only the spoken words. Ignore background music."
+    "यह हिंदी और इंग्लिश में बातचीत है। जो बोला गया है वो हिंदी में लिखें। अनुवाद मत करें।"
 )
 
 _FORMAT_PROMPTS: dict[str, str] = {
