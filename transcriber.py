@@ -17,31 +17,35 @@ WHISPER_INITIAL_PROMPT = (
 
 _FORMAT_PROMPTS: dict[str, str] = {
     "hi": (
-        "You are a Hindi transcript editor. "
-        "The input is a raw Whisper transcription of Hindi/English speech. "
-        "Clean it up: fix spelling errors, remove filler sounds like 'um', 'uh', 'hmm', 'aaa'. "
-        "Write everything in proper Devanagari script. Keep English words that were spoken in English. "
-        "Do NOT translate. Output only the cleaned transcript."
+        "You are a transcript formatter. The input is a raw Whisper transcription of Hindi/English speech. "
+        "Your ONLY jobs are: remove filler sounds (um, uh, hmm, aaa), fix obvious Whisper spelling mistakes. "
+        "STRICT RULES — you will be penalised for breaking these:\n"
+        "- Do NOT change, replace, or paraphrase ANY word. 'tere' stays 'tere', 'khwaab' stays 'khwaab'.\n"
+        "- Do NOT translate or substitute synonyms.\n"
+        "- Do NOT rewrite sentences.\n"
+        "- Keep every Hindi and English word exactly as spoken.\n"
+        "Output only the lightly cleaned transcript in Devanagari script."
     ),
     "en": (
-        "You are a professional Hindi-to-English translator. "
-        "Translate the following Hindi transcript into natural, fluent English. "
-        "Preserve tone and meaning. Keep any proper nouns or brand names as-is. "
-        "Output only the translated text, nothing else."
+        "You are a literal translator. Translate the following Hindi transcript word-for-word into English. "
+        "STRICT RULES:\n"
+        "- Translate as literally as possible — do not paraphrase.\n"
+        "- Do not change the meaning or substitute words with synonyms.\n"
+        "- Keep proper nouns, names, and brand names exactly as-is.\n"
+        "Output only the translated text."
     ),
     "hinglish": (
-        "You are a Hinglish writer. Rewrite the Hindi transcript in Hinglish — "
-        "Roman script that sounds exactly like how urban Indians speak casually, "
-        "mixing Hindi and English naturally in the same sentence.\n\n"
-        "Rules:\n"
-        "- Write Hindi words phonetically in Roman letters (e.g. 'kar raha hoon', 'bahut acha')\n"
-        "- Keep English words that were spoken in English exactly as-is\n"
-        "- Do NOT translate Hindi to English — just romanize it\n"
-        "- Match the original sentence structure\n\n"
+        "You are a transliterator. Convert the Hindi Devanagari transcript into Roman script (Hinglish). "
+        "STRICT RULES — you will be penalised for breaking these:\n"
+        "- Transliterate each word phonetically, word-for-word. Do NOT change any word.\n"
+        "- 'तेरे' → 'tere' (not 'tumhare'). 'ख्वाब' → 'khwaab' (not 'sapne').\n"
+        "- Do NOT translate, paraphrase, or substitute synonyms. Ever.\n"
+        "- Keep English words that appear in the transcript exactly as-is.\n"
+        "- Preserve sentence structure exactly.\n\n"
         "Example:\n"
-        "Input: मैं आज एक नया project शुरू कर रहा हूं जो बहुत exciting है।\n"
-        "Output: Main aaj ek naya project shuru kar raha hoon jo bahut exciting hai.\n\n"
-        "Output only the Hinglish text, nothing else."
+        "Input: तेरे ख्वाब मेरे दिल में हैं\n"
+        "Output: tere khwaab mere dil mein hain\n\n"
+        "Output only the transliterated text."
     ),
 }
 
@@ -163,7 +167,7 @@ def _apply_format(client: Groq, text: str, output_format: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text},
         ],
-        temperature=0.1,
+        temperature=0.0,
         max_tokens=4096,
     )
     return response.choices[0].message.content.strip()
