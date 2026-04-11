@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-VOCAB_FILE = "/tmp/shayri_vocab.json"
+VOCAB_FILE = os.environ.get("VOCAB_FILE", "/data/shayri_vocab.json")
 
 # Base corrections hardcoded — never lost on restart
 BASE_CORRECTIONS: dict[str, str] = {
