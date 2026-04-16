@@ -1,5 +1,8 @@
 import os
+import asyncio
 import logging
+from aiohttp import web
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from handlers import (
     start_command, help_command,
@@ -17,6 +20,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_ptb_app: Application | None = None
+
+
+async def telegram_webhook(request: web.Request) -> web.Response:
+    data = await request.json()
+    update = Update.de_json(data, _ptb_app.bot)
+    await _ptb_app.process_update(update)
+    return web.Response(text="OK")
+
+
+async def health_check(request: web.Request) -> web.Response:
+    return web.Response(text="OK")
+
+
+def _build_app(token: str) -> Application:
+    app = Application.builder().token(token).build()
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("setlang", setlang_command))
+    app.add_handler(CommandHandler("setformat", setformat_command))
+    app.add_handler(CommandHandler("approve", approve_command))
+    app.add_handler(CommandHandler("deny", deny_command))
+    app.add_handler(CommandHandler("correct", correct_command))
+    app.add_handler(CommandHandler("vocab", vocab_command))
+    app.add_handler(CommandHandler("forget", forget_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    app.add_handler(MessageHandler(
+        filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL,
+        handle_video
+    ))
+    return app
+
+
+async def run_webhook(token: str, webhook_url: str, port: int) -> None:
+    global _ptb_app
+    _ptb_app = _build_app(token)
+
+    full_webhook_url = f"{webhook_url}/webhook/{token}"
+    await _ptb_app.bot.set_webhook(url=full_webhook_url, drop_pending_updates=True)
+    logger.info("Webhook set to %s", full_webhook_url)
+
+    web_app = web.Application()
+    web_app.router.add_post(f"/webhook/{token}", telegram_webhook)
+    web_app.router.add_get("/", health_check)
+
+    async with _ptb_app:
+        await _ptb_app.start()
+
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info("Server listening on port %d", port)
+
+        await asyncio.Event().wait()  # run forever
+
+        await _ptb_app.stop()
+
 
 def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -30,29 +91,16 @@ def main() -> None:
     auth.init()
     vocab.init()
 
-    app = Application.builder().token(token).build()
+    webhook_url = os.environ.get("WEBHOOK_URL", "").rstrip("/")
+    port = int(os.environ.get("PORT", 8080))
 
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("setlang", setlang_command))
-    app.add_handler(CommandHandler("setformat", setformat_command))
-    app.add_handler(CommandHandler("approve", approve_command))
-    app.add_handler(CommandHandler("deny", deny_command))
-    app.add_handler(CommandHandler("correct", correct_command))
-    app.add_handler(CommandHandler("vocab", vocab_command))
-    app.add_handler(CommandHandler("forget", forget_command))
-
-    # URL messages
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
-
-    # Video / audio / voice / document files
-    app.add_handler(MessageHandler(
-        filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL,
-        handle_video
-    ))
-
-    logger.info("Bot started. Polling for messages...")
-    app.run_polling(drop_pending_updates=True)
+    if webhook_url:
+        logger.info("Starting in webhook mode on port %d", port)
+        asyncio.run(run_webhook(token, webhook_url, port))
+    else:
+        logger.info("WEBHOOK_URL not set — starting in polling mode (local dev)")
+        app = _build_app(token)
+        app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
